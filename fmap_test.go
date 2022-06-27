@@ -62,13 +62,33 @@ func BenchmarkFMapAdd(b *testing.B) {
 	rand.Seed(seed)
 	fm := fmap.NewFMap[uint, string]()
 
+	for i := uint(0); i < uint(b.N); i++ {
+		fm.Set(i, "Hi")
+	}
+}
+
+func BenchmarkGoMapAdd(b *testing.B) {
+
+	rand.Seed(seed)
+	m := map[uint]string{}
+
+	for i := uint(0); i < uint(b.N); i++ {
+		m[i] = "Hi"
+	}
+}
+
+func BenchmarkFMapAddRand(b *testing.B) {
+
+	rand.Seed(seed)
+	fm := fmap.NewFMap[uint, string]()
+
 	for i := 0; i < b.N; i++ {
 		x := uint(rand.Uint32())
 		fm.Set(x, "Hi")
 	}
 }
 
-func BenchmarkGoMapAdd(b *testing.B) {
+func BenchmarkGoMapAddRand(b *testing.B) {
 
 	rand.Seed(seed)
 	m := map[uint]string{}
@@ -150,5 +170,79 @@ func BenchmarkGoMapGetRand(b *testing.B) {
 	for i := uint(0); i < uint(b.N); i++ {
 		x := uint(rand.Uint32())
 		mapOut = m[x]
+	}
+}
+
+var mapContains = false
+
+func BenchmarkFMapContains(b *testing.B) {
+
+	b.StopTimer()
+	rand.Seed(seed)
+	fm := fmap.NewFMap[uint, string]()
+
+	for i := 0; i < 1000_000; i++ {
+		x := uint(rand.Uint32())
+		fm.Set(x, "Hi")
+	}
+	b.StartTimer()
+
+	for i := uint(0); i < uint(b.N); i++ {
+		mapContains = fm.Contains(i)
+	}
+
+}
+
+func BenchmarkGoMapContains(b *testing.B) {
+
+	b.StopTimer()
+	rand.Seed(seed)
+	m := map[uint]string{}
+
+	for i := 0; i < 1000_000; i++ {
+		x := uint(rand.Uint32())
+		m[x] = "Hi"
+	}
+	b.StartTimer()
+
+	for i := uint(0); i < uint(b.N); i++ {
+		_, mapContains = m[i]
+	}
+}
+
+func BenchmarkFMapContainsRand(b *testing.B) {
+
+	b.StopTimer()
+	rand.Seed(seed)
+	fm := fmap.NewFMap[uint, string]()
+
+	for i := 0; i < 1000_000; i++ {
+		x := uint(rand.Uint32())
+		fm.Set(x, "Hi")
+	}
+	b.StartTimer()
+
+	for i := uint(0); i < uint(b.N); i++ {
+		x := uint(rand.Uint32())
+		mapContains = fm.Contains(x)
+	}
+
+}
+
+func BenchmarkGoMapContainsRand(b *testing.B) {
+
+	b.StopTimer()
+	rand.Seed(seed)
+	m := map[uint]string{}
+
+	for i := 0; i < 1000_000; i++ {
+		x := uint(rand.Uint32())
+		m[x] = "Hi"
+	}
+	b.StartTimer()
+
+	for i := uint(0); i < uint(b.N); i++ {
+		x := uint(rand.Uint32())
+		_, mapContains = m[x]
 	}
 }

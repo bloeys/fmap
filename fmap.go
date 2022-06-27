@@ -15,14 +15,14 @@ type AllowedKeysIf interface {
 	uint8 | uint16 | uint32 | uint64 | uint
 }
 
-type element[T AllowedKeysIf, V any] struct {
-	Key   T
-	Value V
-	IsSet bool
-}
-
 type FMap[T AllowedKeysIf, V any] struct {
-	Elements []element[T, V]
+
+	//This setup (instead of []struct{Key,Value,IsSet}) makes better use of cache when
+	//for example trying to find a set/unset element, since cache is full of one type of array
+	//not useless data
+	Keys   []T
+	Values []V
+	IsSet  []bool
 
 	cap         uint64
 	len         uint64
@@ -33,16 +33,19 @@ func (fm *FMap[T, V]) Set(key T, value V) {
 
 	bucketIndex := fm.GetBucketIndexFromKey(key)
 	inBucketIndex := fm.GetElementIndexFromKey(key)
-	e := &fm.Elements[bucketIndex+inBucketIndex]
+	elementIndex := bucketIndex + inBucketIndex
 
-	if !e.IsSet {
-		e.Key = key
-		e.Value = value
-		e.IsSet = true
+	if !fm.IsSet[elementIndex] {
+
+		fm.Keys[elementIndex] = key
+		fm.Values[elementIndex] = value
+		fm.IsSet[elementIndex] = true
 		fm.len++
 		return
-	} else if e.Key == key {
-		e.Value = value
+	}
+
+	if fm.Keys[elementIndex] == key {
+		fm.Values[elementIndex] = value
 		return
 	}
 
@@ -51,19 +54,18 @@ func (fm *FMap[T, V]) Set(key T, value V) {
 
 		for i := bucketIndex; i < bucketIndex+elementsPerBucket; i++ {
 
-			e := &fm.Elements[i]
-			if e.IsSet {
-				if e.Key != key {
+			if fm.IsSet[i] {
+				if fm.Keys[i] != key {
 					continue
 				}
 
-				e.Value = value
+				fm.Values[i] = value
 				return
 			}
 
-			e.Key = key
-			e.Value = value
-			e.IsSet = true
+			fm.Keys[i] = key
+			fm.Values[i] = value
+			fm.IsSet[i] = true
 			fm.len++
 			return
 		}
@@ -79,20 +81,25 @@ func (fm *FMap[T, V]) Set(key T, value V) {
 
 func (fm *FMap[T, V]) Grow() {
 
-	oldElements := fm.Elements
+	oldKeys := fm.Keys
+	oldValues := fm.Values
+	oldIsSet := fm.IsSet
 
 	fm.len = 0 //Readding values to the new bucket will increase the size
-	fm.cap = fm.cap * 2
+	fm.cap *= 2
 	fm.bucketCount *= 2
-	fm.Elements = make([]element[T, V], fm.cap)
-	for i := 0; i < len(oldElements); i++ {
 
-		e := &oldElements[i]
-		if !e.IsSet {
+	fm.Keys = make([]T, fm.cap)
+	fm.Values = make([]V, fm.cap)
+	fm.IsSet = make([]bool, fm.cap)
+
+	for i := 0; i < len(oldIsSet); i++ {
+
+		if !oldIsSet[i] {
 			continue
 		}
 
-		fm.Set(e.Key, e.Value)
+		fm.Set(oldKeys[i], oldValues[i])
 	}
 }
 
@@ -107,12 +114,11 @@ func (fm *FMap[T, V]) GetWithOK(key T) (value V, ok bool) {
 
 	for i := bucketIndex; i < bucketIndex+elementsPerBucket; i++ {
 
-		e := &fm.Elements[i]
-		if !e.IsSet || e.Key != key {
+		if !fm.IsSet[i] || fm.Keys[i] != key {
 			continue
 		}
 
-		return e.Value, true
+		return fm.Values[i], true
 	}
 
 	return value, false
@@ -124,8 +130,7 @@ func (fm *FMap[T, V]) Contains(key T) bool {
 
 	for i := bucketIndex; i < bucketIndex+elementsPerBucket; i++ {
 
-		e := &fm.Elements[i]
-		if !e.IsSet || e.Key != key {
+		if !fm.IsSet[i] || fm.Keys[i] != key {
 			continue
 		}
 
@@ -141,12 +146,11 @@ func (fm *FMap[T, V]) Delete(key T) {
 
 	for i := bucketIndex; i < bucketIndex+elementsPerBucket; i++ {
 
-		e := &fm.Elements[i]
-		if e.Key != key {
+		if !fm.IsSet[i] || fm.Keys[i] != key {
 			continue
 		}
 
-		e.IsSet = false
+		fm.IsSet[i] = false
 		return
 	}
 }
@@ -175,7 +179,10 @@ func NewFMap[T AllowedKeysIf, V any]() *FMap[T, V] {
 
 	//We need to ensure bucket count is always even so we can use & to do remainder
 	fm := &FMap[T, V]{
-		Elements:    make([]element[T, V], 2*elementsPerBucket),
+		Keys:   make([]T, 2*elementsPerBucket),
+		Values: make([]V, 2*elementsPerBucket),
+		IsSet:  make([]bool, 2*elementsPerBucket),
+
 		len:         0,
 		cap:         2 * elementsPerBucket,
 		bucketCount: 2,
