@@ -152,7 +152,11 @@ func (fm *FMap[T, V]) Contains(key T) bool {
 
 	bucketIndex := fm.GetBucketIndexFromKey(key)
 
-	for i := bucketIndex; i < bucketIndex+elementsPerBucket; i++ {
+	_ = fm.Keys[bucketIndex+elementsPerBucket-1]
+	_ = fm.Values[bucketIndex+elementsPerBucket-1]
+	_ = fm.IsSet[bucketIndex+elementsPerBucket-1]
+
+	for i := bucketIndex; i <= bucketIndex+elementsPerBucket-1; i++ {
 
 		if !fm.IsSet[i] || fm.Keys[i] != key {
 			continue
