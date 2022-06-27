@@ -4,9 +4,9 @@ import "fmt"
 
 const (
 	//Must always be an even number
-	elementsPerBucket         = 64
-	elementsPerBucketBits     = 6
-	elementsPerBucketBitsMask = 0b0011_1111
+	elementsPerBucket           = 8
+	elementsPerBucketBits       = 3
+	elementsPerBucketBitsMask64 = 0x0000_0000_0000_0007
 
 	maxConsecutiveGrows = 2
 )
@@ -21,26 +21,25 @@ type element[T AllowedKeysIf, V any] struct {
 	IsSet bool
 }
 
-type Bucket[T AllowedKeysIf, V any] struct {
-	Elements [elementsPerBucket]element[T, V]
-}
-
 type FMap[T AllowedKeysIf, V any] struct {
-	Buckets     []Bucket[T, V]
-	BucketCount uint64
-	Len         uint
+	Elements []element[T, V]
+
+	cap         uint64
+	len         uint64
+	bucketCount uint64
 }
 
 func (fm *FMap[T, V]) Set(key T, value V) {
 
+	bucketIndex := fm.GetBucketIndexFromKey(key)
 	inBucketIndex := fm.GetElementIndexFromKey(key)
-	e := &fm.Buckets[fm.GetBucketIndexFromKey(key)].Elements[inBucketIndex]
+	e := &fm.Elements[bucketIndex+inBucketIndex]
 
 	if !e.IsSet {
 		e.Key = key
 		e.Value = value
 		e.IsSet = true
-		fm.Len++
+		fm.len++
 		return
 	} else if e.Key == key {
 		e.Value = value
@@ -50,11 +49,9 @@ func (fm *FMap[T, V]) Set(key T, value V) {
 	// fmt.Println("Collision with key", key, "at load factor of", fm.LoadFactor(), "and len of", fm.Len)
 	for attempts := 0; attempts < maxConsecutiveGrows; attempts++ {
 
-		bucketIndex := fm.GetBucketIndexFromKey(key)
-		b := &fm.Buckets[bucketIndex]
-		for i := 0; i < elementsPerBucket; i++ {
+		for i := bucketIndex; i < bucketIndex+elementsPerBucket; i++ {
 
-			e := &b.Elements[i]
+			e := &fm.Elements[i]
 			if e.IsSet {
 				if e.Key != key {
 					continue
@@ -67,12 +64,14 @@ func (fm *FMap[T, V]) Set(key T, value V) {
 			e.Key = key
 			e.Value = value
 			e.IsSet = true
-			fm.Len++
+			fm.len++
 			return
 		}
 
 		// println("Growing to", len(fm.Buckets)*2*elementsPerBucket, "with key", key, "; Len before grow:", fm.Len)
 		fm.Grow()
+
+		bucketIndex = fm.GetBucketIndexFromKey(key)
 	}
 
 	panic("Grew map " + fmt.Sprint(maxConsecutiveGrows) + " times but still couldn't add key. Something is wrong. Key: " + fmt.Sprint(key))
@@ -80,55 +79,35 @@ func (fm *FMap[T, V]) Set(key T, value V) {
 
 func (fm *FMap[T, V]) Grow() {
 
-	oldBuckets := fm.Buckets
+	oldElements := fm.Elements
 
-	newBucketCount := uint64(len(fm.Buckets)) * 2
+	fm.len = 0 //Readding values to the new bucket will increase the size
+	fm.cap = fm.cap * 2
+	fm.bucketCount *= 2
+	fm.Elements = make([]element[T, V], fm.cap)
+	for i := 0; i < len(oldElements); i++ {
 
-	fm.Len = 0 //Readding values to the new bucket will increase the size
-	fm.BucketCount = newBucketCount
-	fm.Buckets = make([]Bucket[T, V], newBucketCount)
-	for i := 0; i < len(oldBuckets); i++ {
-
-		b := &oldBuckets[i]
-		for i := 0; i < elementsPerBucket; i++ {
-
-			e := &b.Elements[i]
-			if !e.IsSet {
-				continue
-			}
-
-			fm.Set(e.Key, e.Value)
-		}
-	}
-
-}
-
-func (fm *FMap[T, V]) Get(key T) (value V) {
-
-	i := fm.GetBucketIndexFromKey(key)
-	b := &fm.Buckets[i]
-
-	for i := 0; i < elementsPerBucket; i++ {
-
-		e := &b.Elements[i]
-		if !e.IsSet || e.Key != key {
+		e := &oldElements[i]
+		if !e.IsSet {
 			continue
 		}
 
-		return e.Value
+		fm.Set(e.Key, e.Value)
 	}
+}
 
+func (fm *FMap[T, V]) Get(key T) (value V) {
+	value, _ = fm.GetWithOK(key)
 	return value
 }
 
 func (fm *FMap[T, V]) GetWithOK(key T) (value V, ok bool) {
 
-	i := fm.GetBucketIndexFromKey(key)
-	b := &fm.Buckets[i]
+	bucketIndex := fm.GetBucketIndexFromKey(key)
 
-	for i := 0; i < elementsPerBucket; i++ {
+	for i := bucketIndex; i < bucketIndex+elementsPerBucket; i++ {
 
-		e := &b.Elements[i]
+		e := &fm.Elements[i]
 		if !e.IsSet || e.Key != key {
 			continue
 		}
@@ -141,12 +120,11 @@ func (fm *FMap[T, V]) GetWithOK(key T) (value V, ok bool) {
 
 func (fm *FMap[T, V]) Contains(key T) bool {
 
-	i := fm.GetBucketIndexFromKey(key)
-	b := &fm.Buckets[i]
+	bucketIndex := fm.GetBucketIndexFromKey(key)
 
-	for i := 0; i < elementsPerBucket; i++ {
+	for i := bucketIndex; i < bucketIndex+elementsPerBucket; i++ {
 
-		e := &b.Elements[i]
+		e := &fm.Elements[i]
 		if !e.IsSet || e.Key != key {
 			continue
 		}
@@ -159,12 +137,11 @@ func (fm *FMap[T, V]) Contains(key T) bool {
 
 func (fm *FMap[T, V]) Delete(key T) {
 
-	i := fm.GetBucketIndexFromKey(key)
-	b := &fm.Buckets[i]
+	bucketIndex := fm.GetBucketIndexFromKey(key)
 
-	for i := 0; i < elementsPerBucket; i++ {
+	for i := bucketIndex; i < bucketIndex+elementsPerBucket; i++ {
 
-		e := &b.Elements[i]
+		e := &fm.Elements[i]
 		if e.Key != key {
 			continue
 		}
@@ -178,28 +155,30 @@ func (fm *FMap[T, V]) GetBucketIndexFromKey(key T) uint64 {
 
 	//We can get the remainder without division by: number & (evenNumber - 1).
 	//The lower n bits are not used for bucket selection because they are reserved for in-bucket indexing
-	return uint64(key>>elementsPerBucketBits) & uint64(len(fm.Buckets)-1)
+	return (uint64(key>>elementsPerBucketBits) & (fm.bucketCount - 1)) * elementsPerBucket
 }
 
-func (fm *FMap[T, V]) GetElementIndexFromKey(key T) uint8 {
-	x := uint8(key) & elementsPerBucketBitsMask
+func (fm *FMap[T, V]) GetElementIndexFromKey(key T) uint64 {
+	x := uint64(key) & elementsPerBucketBitsMask64
 	return x & (elementsPerBucket - 1)
 }
 
 func (fm *FMap[T, V]) LoadFactor() float32 {
-	return float32(fm.Len) / float32(fm.Cap())
+	return float32(fm.len) / float32(fm.Cap())
 }
 
-func (fm *FMap[T, V]) Cap() int {
-	return len(fm.Buckets) * elementsPerBucket
+func (fm *FMap[T, V]) Cap() uint64 {
+	return fm.cap
 }
 
 func NewFMap[T AllowedKeysIf, V any]() *FMap[T, V] {
 
 	//We need to ensure bucket count is always even so we can use & to do remainder
 	fm := &FMap[T, V]{
-		Buckets:     make([]Bucket[T, V], 2),
-		BucketCount: 2,
+		Elements:    make([]element[T, V], 2*elementsPerBucket),
+		len:         0,
+		cap:         2 * elementsPerBucket,
+		bucketCount: 2,
 	}
 
 	return fm
