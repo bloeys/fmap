@@ -32,40 +32,53 @@ type FMap[T AllowedKeysIf, V any] struct {
 func (fm *FMap[T, V]) Set(key T, value V) {
 
 	bucketIndex := fm.GetBucketIndexFromKey(key)
-	inBucketIndex := fm.GetElementIndexFromKey(key)
-	elementIndex := bucketIndex + inBucketIndex
+	elementIndex := bucketIndex + fm.GetElementIndexFromKey(key)
 
-	if !fm.IsSet[elementIndex] {
+	//Removes all bound checks until the loop.
+	//For some reason using fm.XYZ directly doesn't do it properly
+	ks := fm.Keys
+	vs := fm.Values
+	is := fm.IsSet
+	_ = ks[elementIndex]
+	_ = vs[elementIndex]
+	_ = is[elementIndex]
 
-		fm.Keys[elementIndex] = key
-		fm.Values[elementIndex] = value
-		fm.IsSet[elementIndex] = true
+	if !is[elementIndex] {
+
+		ks[elementIndex] = key
+		vs[elementIndex] = value
+		is[elementIndex] = true
 		fm.len++
 		return
 	}
 
-	if fm.Keys[elementIndex] == key {
-		fm.Values[elementIndex] = value
+	if ks[elementIndex] == key {
+		vs[elementIndex] = value
 		return
 	}
-
 	// fmt.Println("Collision with key", key, "at load factor of", fm.LoadFactor(), "and len of", fm.Len)
+
 	for attempts := 0; attempts < maxConsecutiveGrows; attempts++ {
 
-		for i := bucketIndex; i < bucketIndex+elementsPerBucket; i++ {
+		//Removes all bound checks inside the loop
+		_ = ks[bucketIndex+elementsPerBucket-1]
+		_ = vs[bucketIndex+elementsPerBucket-1]
+		_ = is[bucketIndex+elementsPerBucket-1]
 
-			if fm.IsSet[i] {
-				if fm.Keys[i] != key {
+		for i := bucketIndex; i <= bucketIndex+elementsPerBucket-1; i++ {
+
+			if is[i] {
+				if ks[i] != key {
 					continue
 				}
 
-				fm.Values[i] = value
+				vs[i] = value
 				return
 			}
 
-			fm.Keys[i] = key
-			fm.Values[i] = value
-			fm.IsSet[i] = true
+			ks[i] = key
+			vs[i] = value
+			is[i] = true
 			fm.len++
 			return
 		}
@@ -74,6 +87,10 @@ func (fm *FMap[T, V]) Set(key T, value V) {
 		fm.Grow()
 
 		bucketIndex = fm.GetBucketIndexFromKey(key)
+
+		ks = fm.Keys
+		vs = fm.Values
+		is = fm.IsSet
 	}
 
 	panic("Grew map " + fmt.Sprint(maxConsecutiveGrows) + " times but still couldn't add key. Something is wrong. Key: " + fmt.Sprint(key))
@@ -92,6 +109,9 @@ func (fm *FMap[T, V]) Grow() {
 	fm.Keys = make([]T, fm.cap)
 	fm.Values = make([]V, fm.cap)
 	fm.IsSet = make([]bool, fm.cap)
+
+	_ = oldKeys[len(oldIsSet)-1]
+	_ = oldValues[len(oldIsSet)-1]
 
 	for i := 0; i < len(oldIsSet); i++ {
 
