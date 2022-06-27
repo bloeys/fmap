@@ -246,3 +246,75 @@ func BenchmarkGoMapContainsRand(b *testing.B) {
 		_, mapContains = m[x]
 	}
 }
+
+func BenchmarkFMapDelete(b *testing.B) {
+
+	b.StopTimer()
+	rand.Seed(seed)
+	fm := fmap.NewFMap[uint, string]()
+
+	for i := 0; i < 1000_000; i++ {
+		x := uint(rand.Uint32())
+		fm.Set(x, "Hi")
+	}
+	b.StartTimer()
+
+	for i := uint(0); i < uint(b.N); i++ {
+		fm.Delete(i)
+	}
+
+}
+
+func BenchmarkGoMapDelete(b *testing.B) {
+
+	b.StopTimer()
+	rand.Seed(seed)
+	m := map[uint]string{}
+
+	for i := 0; i < 1000_000; i++ {
+		x := uint(rand.Uint32())
+		m[x] = "Hi"
+	}
+	b.StartTimer()
+
+	for i := uint(0); i < uint(b.N); i++ {
+		delete(m, i)
+	}
+}
+
+func BenchmarkFMapDeleteRand(b *testing.B) {
+
+	b.StopTimer()
+	rand.Seed(seed)
+	fm := fmap.NewFMap[uint, string]()
+
+	for i := 0; i < 1000_000; i++ {
+		x := uint(rand.Uint32())
+		fm.Set(x, "Hi")
+	}
+	b.StartTimer()
+
+	for i := uint(0); i < uint(b.N); i++ {
+		x := uint(rand.Uint32())
+		fm.Delete(x)
+	}
+
+}
+
+func BenchmarkGoMapDeleteRand(b *testing.B) {
+
+	b.StopTimer()
+	rand.Seed(seed)
+	m := map[uint]string{}
+
+	for i := 0; i < 1000_000; i++ {
+		x := uint(rand.Uint32())
+		m[x] = "Hi"
+	}
+	b.StartTimer()
+
+	for i := uint(0); i < uint(b.N); i++ {
+		x := uint(rand.Uint32())
+		delete(m, x)
+	}
+}
