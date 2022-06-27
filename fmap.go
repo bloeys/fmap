@@ -1,5 +1,7 @@
 package fmap
 
+import "fmt"
+
 const (
 	maxElementsPerBucket = 8
 )
@@ -22,22 +24,48 @@ type FMap[T AllowedKeysIf, V any] struct {
 	Buckets []Bucket[T, V]
 }
 
-func (fm *FMap[T, V]) Add(key T, value V) {
+func (fm *FMap[T, V]) Set(key T, value V) {
 
-	i := fm.GetBucketIndexFromKey(key)
-	b := &fm.Buckets[i]
+	for attempts := 0; attempts < 3; attempts++ {
 
-	for i := 0; i < maxElementsPerBucket; i++ {
+		i := fm.GetBucketIndexFromKey(key)
+		b := &fm.Buckets[i]
+		for i := 0; i < maxElementsPerBucket; i++ {
 
-		e := &b.Elements[i]
-		if e.IsSet {
-			continue
+			e := &b.Elements[i]
+			if e.IsSet {
+				continue
+			}
+
+			e.Key = key
+			e.Value = value
+			e.IsSet = true
+			return
 		}
 
-		e.Key = key
-		e.Value = value
-		e.IsSet = true
-		break
+		println("Growing to", len(fm.Buckets)*2, "with key", key)
+		fm.Grow()
+	}
+
+	panic("Grew map 3 times but still couldn't add key. Something is wrong. Key: " + fmt.Sprint(key))
+}
+
+func (fm *FMap[T, V]) Grow() {
+
+	oldBuckets := fm.Buckets
+	fm.Buckets = make([]Bucket[T, V], len(fm.Buckets)*2)
+	for i := 0; i < len(oldBuckets); i++ {
+
+		b := &oldBuckets[i]
+		for i := 0; i < maxElementsPerBucket; i++ {
+
+			e := &b.Elements[i]
+			if !e.IsSet {
+				continue
+			}
+
+			fm.Set(e.Key, e.Value)
+		}
 	}
 }
 
@@ -102,7 +130,7 @@ func (fm *FMap[T, V]) GetBucketIndexFromKey(key T) uint64 {
 func NewFMap[T AllowedKeysIf, V any]() *FMap[T, V] {
 
 	fm := &FMap[T, V]{
-		Buckets: make([]Bucket[T, V], 10),
+		Buckets: make([]Bucket[T, V], 8),
 	}
 
 	return fm
