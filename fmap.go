@@ -61,12 +61,13 @@ func (fm *FMap[T, V]) Set(key T, value V) {
 	vs := fm.Values
 
 	//Removes all bound checks inside the loop
-	_ = ks[bucketIndex+ElementsPerBucket-1]
-	_ = vs[bucketIndex+ElementsPerBucket-1]
+	maxBucketIndex := bucketIndex + ElementsPerBucket - 1
+	_ = ks[maxBucketIndex]
+	_ = vs[maxBucketIndex]
 
 	//Handle key overwriting
 	uncheckedElements := *bucketElementCounter
-	for i := bucketIndex; uncheckedElements > 0 && i <= bucketIndex+ElementsPerBucket-1; i++ {
+	for i := bucketIndex; uncheckedElements > 0 && i <= maxBucketIndex; i++ {
 
 		uncheckedElements--
 		if ks[i] == key {
@@ -76,8 +77,9 @@ func (fm *FMap[T, V]) Set(key T, value V) {
 	}
 
 	//New key
-	ks[bucketIndex+uint64(*bucketElementCounter)] = key
-	vs[bucketIndex+uint64(*bucketElementCounter)] = value
+	bi := bucketIndex + uint64(*bucketElementCounter)
+	ks[bi] = key
+	vs[bi] = value
 	*bucketElementCounter++
 	fm.len++
 }
