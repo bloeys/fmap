@@ -8,6 +8,10 @@ import (
 	"github.com/bloeys/fmap"
 )
 
+const (
+	mapSize = 1000_000
+)
+
 func TestFMap(t *testing.T) {
 
 	fm := fmap.NewFMap[uint, string]()
@@ -30,8 +34,17 @@ func TestFMap(t *testing.T) {
 	v, ok = fm.GetWithOK(10)
 	AllTrue(t, !fm.Contains(10), fm.Get(10) == "", v == "", !ok)
 
+	//Ensure ElementsInBucket works properly
+	fm = fmap.NewFMap[uint, string]()
+	fm.Set(0, "A")
+	fm.Set(1, "B")
+	fm.Delete(0)
+	v, ok = fm.GetWithOK(1)
+	AllTrue(t, v == "B", ok)
+
 	for i := uint(0); i < 256; i++ {
 		fm.Set(i, "There"+fmt.Sprint(i))
+		// fmt.Printf("i=%d, bucket=%d, index=%d\n", i, fm.GetBucketIndexFromKey(i)/fmap.ElementsPerBucket, fm.GetElementIndexFromKey(i))
 	}
 
 	for i := uint(0); i < 256; i++ {
@@ -107,7 +120,7 @@ func BenchmarkFMapGet(b *testing.B) {
 	rand.Seed(seed)
 	fm := fmap.NewFMap[uint, string]()
 
-	for i := 0; i < 1000_000; i++ {
+	for i := 0; i < mapSize; i++ {
 		x := uint(rand.Uint32())
 		fm.Set(x, "Hi")
 	}
@@ -125,7 +138,7 @@ func BenchmarkGoMapGet(b *testing.B) {
 	rand.Seed(seed)
 	m := map[uint]string{}
 
-	for i := 0; i < 1000_000; i++ {
+	for i := 0; i < mapSize; i++ {
 		x := uint(rand.Uint32())
 		m[x] = "Hi"
 	}
@@ -142,7 +155,7 @@ func BenchmarkFMapGetRand(b *testing.B) {
 	rand.Seed(seed)
 	fm := fmap.NewFMap[uint, string]()
 
-	for i := 0; i < 1000_000; i++ {
+	for i := 0; i < mapSize; i++ {
 		x := uint(rand.Uint32())
 		fm.Set(x, "Hi")
 	}
@@ -161,7 +174,7 @@ func BenchmarkGoMapGetRand(b *testing.B) {
 	rand.Seed(seed)
 	m := map[uint]string{}
 
-	for i := 0; i < 1000_000; i++ {
+	for i := 0; i < mapSize; i++ {
 		x := uint(rand.Uint32())
 		m[x] = "Hi"
 	}
@@ -181,7 +194,7 @@ func BenchmarkFMapContains(b *testing.B) {
 	rand.Seed(seed)
 	fm := fmap.NewFMap[uint, string]()
 
-	for i := 0; i < 1000_000; i++ {
+	for i := 0; i < mapSize; i++ {
 		x := uint(rand.Uint32())
 		fm.Set(x, "Hi")
 	}
@@ -199,7 +212,7 @@ func BenchmarkGoMapContains(b *testing.B) {
 	rand.Seed(seed)
 	m := map[uint]string{}
 
-	for i := 0; i < 1000_000; i++ {
+	for i := 0; i < mapSize; i++ {
 		x := uint(rand.Uint32())
 		m[x] = "Hi"
 	}
@@ -216,7 +229,7 @@ func BenchmarkFMapContainsRand(b *testing.B) {
 	rand.Seed(seed)
 	fm := fmap.NewFMap[uint, string]()
 
-	for i := 0; i < 1000_000; i++ {
+	for i := 0; i < mapSize; i++ {
 		x := uint(rand.Uint32())
 		fm.Set(x, "Hi")
 	}
@@ -235,7 +248,7 @@ func BenchmarkGoMapContainsRand(b *testing.B) {
 	rand.Seed(seed)
 	m := map[uint]string{}
 
-	for i := 0; i < 1000_000; i++ {
+	for i := 0; i < mapSize; i++ {
 		x := uint(rand.Uint32())
 		m[x] = "Hi"
 	}
@@ -253,7 +266,7 @@ func BenchmarkFMapDelete(b *testing.B) {
 	rand.Seed(seed)
 	fm := fmap.NewFMap[uint, string]()
 
-	for i := 0; i < 1000_000; i++ {
+	for i := 0; i < mapSize; i++ {
 		x := uint(rand.Uint32())
 		fm.Set(x, "Hi")
 	}
@@ -271,7 +284,7 @@ func BenchmarkGoMapDelete(b *testing.B) {
 	rand.Seed(seed)
 	m := map[uint]string{}
 
-	for i := 0; i < 1000_000; i++ {
+	for i := 0; i < mapSize; i++ {
 		x := uint(rand.Uint32())
 		m[x] = "Hi"
 	}
@@ -288,7 +301,7 @@ func BenchmarkFMapDeleteRand(b *testing.B) {
 	rand.Seed(seed)
 	fm := fmap.NewFMap[uint, string]()
 
-	for i := 0; i < 1000_000; i++ {
+	for i := 0; i < mapSize; i++ {
 		x := uint(rand.Uint32())
 		fm.Set(x, "Hi")
 	}
@@ -307,7 +320,7 @@ func BenchmarkGoMapDeleteRand(b *testing.B) {
 	rand.Seed(seed)
 	m := map[uint]string{}
 
-	for i := 0; i < 1000_000; i++ {
+	for i := 0; i < mapSize; i++ {
 		x := uint(rand.Uint32())
 		m[x] = "Hi"
 	}

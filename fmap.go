@@ -4,11 +4,11 @@ import "fmt"
 
 const (
 	//Must always be an even number
-	elementsPerBucket           = 8
+	ElementsPerBucket           = 8
 	elementsPerBucketBits       = 3
-	elementsPerBucketBitsMask64 = 0x0000_0000_0000_0007
+	elementsPerBucketBitsMask64 = 0x0000_0000_0000_0007 //0b0000...0000_0111
 
-	maxConsecutiveGrows = 2
+	maxConsecutiveGrows = 3
 )
 
 type AllowedKeysIf interface {
@@ -17,90 +17,78 @@ type AllowedKeysIf interface {
 
 type FMap[T AllowedKeysIf, V any] struct {
 
-	//This setup (instead of []struct{Key,Value,IsSet}) makes better use of cache when
-	//for example trying to find a set/unset element, since cache is full of one type of array
-	//not useless data
-	Keys   []T
-	Values []V
-	IsSet  []bool
+	//Parallel arrays are used (instead of []struct{Key,Value,IsSet}) because they better use cache.
+	//For example looping over IsSet, since cache will be full of IsSets and no useless data (i.e. Keys and Values)
+	Keys             []T
+	Values           []V
+	ElementsInBucket []uint8
 
-	cap         uint64
-	len         uint64
+	cap uint64
+	len uint64
+
+	//A bucket is defined by a starting index in the flat array and a constant size.
+	//For example, if ElementsPerBucket=8 then bucket=0 will be 0<=i<=7, bucket=1 will be 8<=i<=15 etc
 	bucketCount uint64
 }
 
 func (fm *FMap[T, V]) Set(key T, value V) {
 
 	bucketIndex := fm.GetBucketIndexFromKey(key)
-	elementIndex := bucketIndex + fm.GetElementIndexFromKey(key)
+	bucketElementCounter := &fm.ElementsInBucket[bucketIndex>>elementsPerBucketBits]
 
-	//Removes all bound checks until the loop.
-	//For some reason using fm.XYZ directly doesn't do it properly
-	ks := fm.Keys
-	vs := fm.Values
-	is := fm.IsSet
-	_ = ks[elementIndex]
-	_ = vs[elementIndex]
-	_ = is[elementIndex]
-
-	if !is[elementIndex] {
-
-		ks[elementIndex] = key
-		vs[elementIndex] = value
-		is[elementIndex] = true
-		fm.len++
-		return
-	}
-
-	if ks[elementIndex] == key {
-		vs[elementIndex] = value
-		return
-	}
-	// fmt.Println("Collision with key", key, "at load factor of", fm.LoadFactor(), "and len of", fm.Len)
-
+	//Ensure we have room in the selected bucket
+	freedSpaceInBucket := false
 	for attempts := 0; attempts < maxConsecutiveGrows; attempts++ {
 
-		//Removes all bound checks inside the loop
-		_ = ks[bucketIndex+elementsPerBucket-1]
-		_ = vs[bucketIndex+elementsPerBucket-1]
-		_ = is[bucketIndex+elementsPerBucket-1]
-
-		for i := bucketIndex; i <= bucketIndex+elementsPerBucket-1; i++ {
-
-			if is[i] {
-				if ks[i] != key {
-					continue
-				}
-
-				vs[i] = value
-				return
-			}
-
-			ks[i] = key
-			vs[i] = value
-			is[i] = true
-			fm.len++
-			return
+		if *bucketElementCounter == ElementsPerBucket {
+			fm.Grow()
+			bucketIndex = fm.GetBucketIndexFromKey(key)
+			bucketElementCounter = &fm.ElementsInBucket[bucketIndex>>elementsPerBucketBits]
+			continue
 		}
 
-		// println("Growing to", len(fm.Buckets)*2*elementsPerBucket, "with key", key, "; Len before grow:", fm.Len)
-		fm.Grow()
-
-		bucketIndex = fm.GetBucketIndexFromKey(key)
-
-		ks = fm.Keys
-		vs = fm.Values
-		is = fm.IsSet
+		freedSpaceInBucket = true
+		break
 	}
 
-	panic("Grew map " + fmt.Sprint(maxConsecutiveGrows) + " times but still couldn't add key. Something is wrong. Key: " + fmt.Sprint(key))
+	if !freedSpaceInBucket {
+		panic("Grew map " + fmt.Sprint(maxConsecutiveGrows) + " times but still couldn't add key. Something is wrong. Key: " + fmt.Sprint(key))
+	}
+
+	//Removes all bound checks until the loop.
+	//For some reason using fm.XYZ directly doesn't remove all following bound checks
+	ks := fm.Keys
+	vs := fm.Values
+
+	//Removes all bound checks inside the loop
+	_ = ks[bucketIndex+ElementsPerBucket-1]
+	_ = vs[bucketIndex+ElementsPerBucket-1]
+
+	//Handle key overwriting
+	uncheckedElements := *bucketElementCounter
+	for i := bucketIndex; uncheckedElements > 0 && i <= bucketIndex+ElementsPerBucket-1; i++ {
+
+		uncheckedElements--
+		if ks[i] == key {
+			vs[i] = value
+			return
+		}
+	}
+
+	//New key
+	ks[bucketIndex+uint64(*bucketElementCounter)] = key
+	vs[bucketIndex+uint64(*bucketElementCounter)] = value
+	*bucketElementCounter++
+	fm.len++
 }
 
 func (fm *FMap[T, V]) Grow() {
 
 	oldKeys := fm.Keys
 	oldValues := fm.Values
-	oldIsSet := fm.IsSet
+
+	oldBucketCount := fm.bucketCount
+	oldElementsInBucket := fm.ElementsInBucket
 
 	fm.len = 0 //Readding values to the new bucket will increase the size
 	fm.cap *= 2
@@ -108,18 +96,15 @@ func (fm *FMap[T, V]) Grow() {
 
 	fm.Keys = make([]T, fm.cap)
 	fm.Values = make([]V, fm.cap)
-	fm.IsSet = make([]bool, fm.cap)
+	fm.ElementsInBucket = make([]uint8, fm.bucketCount)
 
-	_ = oldKeys[len(oldIsSet)-1]
-	_ = oldValues[len(oldIsSet)-1]
+	for i := uint64(0); i < oldBucketCount; i++ {
 
-	for i := 0; i < len(oldIsSet); i++ {
-
-		if !oldIsSet[i] {
-			continue
+		bucketStartIndex := i * ElementsPerBucket
+		bucketElementsCounter := uint64(oldElementsInBucket[i])
+		for j := uint64(0); j < bucketElementsCounter; j++ {
+			fm.Set(oldKeys[bucketStartIndex+j], oldValues[bucketStartIndex+j])
 		}
-
-		fm.Set(oldKeys[i], oldValues[i])
 	}
 }
 
@@ -132,13 +117,14 @@ func (fm *FMap[T, V]) GetWithOK(key T) (value V, ok bool) {
 
 	bucketIndex := fm.GetBucketIndexFromKey(key)
 
-	_ = fm.Keys[bucketIndex+elementsPerBucket-1]
-	_ = fm.Values[bucketIndex+elementsPerBucket-1]
-	_ = fm.IsSet[bucketIndex+elementsPerBucket-1]
+	_ = fm.Keys[bucketIndex+ElementsPerBucket-1]
+	_ = fm.Values[bucketIndex+ElementsPerBucket-1]
 
-	for i := bucketIndex; i <= bucketIndex+elementsPerBucket-1; i++ {
+	bucketEleCount := fm.ElementsInBucket[bucketIndex>>elementsPerBucketBits]
+	for i := bucketIndex; bucketEleCount > 0; i++ {
 
-		if !fm.IsSet[i] || fm.Keys[i] != key {
+		bucketEleCount--
+		if fm.Keys[i] != key {
 			continue
 		}
 
@@ -152,17 +138,16 @@ func (fm *FMap[T, V]) Contains(key T) bool {
 
 	bucketIndex := fm.GetBucketIndexFromKey(key)
 
-	_ = fm.Keys[bucketIndex+elementsPerBucket-1]
-	_ = fm.Values[bucketIndex+elementsPerBucket-1]
-	_ = fm.IsSet[bucketIndex+elementsPerBucket-1]
+	_ = fm.Keys[bucketIndex+ElementsPerBucket-1]
+	_ = fm.Values[bucketIndex+ElementsPerBucket-1]
 
-	for i := bucketIndex; i <= bucketIndex+elementsPerBucket-1; i++ {
+	bucketEleCount := fm.ElementsInBucket[bucketIndex>>elementsPerBucketBits]
+	for i := bucketIndex; bucketEleCount > 0; i++ {
 
-		if !fm.IsSet[i] || fm.Keys[i] != key {
-			continue
+		bucketEleCount--
+		if fm.Keys[i] == key {
+			return true
 		}
-
-		return true
 	}
 
 	return false
@@ -172,17 +157,26 @@ func (fm *FMap[T, V]) Delete(key T) {
 
 	bucketIndex := fm.GetBucketIndexFromKey(key)
 
-	_ = fm.Keys[bucketIndex+elementsPerBucket-1]
-	_ = fm.Values[bucketIndex+elementsPerBucket-1]
-	_ = fm.IsSet[bucketIndex+elementsPerBucket-1]
+	_ = fm.Keys[bucketIndex+ElementsPerBucket-1]
+	_ = fm.Values[bucketIndex+ElementsPerBucket-1]
 
-	for i := bucketIndex; i <= bucketIndex+elementsPerBucket-1; i++ {
+	elementsInBucket := &fm.ElementsInBucket[bucketIndex>>elementsPerBucketBits]
+	elementsToCheck := *elementsInBucket
+	for i := bucketIndex; elementsToCheck > 0; i++ {
 
-		if !fm.IsSet[i] || fm.Keys[i] != key {
+		if fm.Keys[i] != key {
+			elementsToCheck--
 			continue
 		}
 
-		fm.IsSet[i] = false
+		//Move the deleted key to the newly 'unreachable' bucket location.
+		//Any location >ElementsInBucket is unreachable, and when the counter is
+		//decremented a new location is created that is unreachable.
+		//Put the deleted key/value there.
+		unreachableIndex := bucketIndex + uint64(*elementsInBucket-1)
+		fm.Keys[i], fm.Keys[unreachableIndex] = fm.Keys[unreachableIndex], fm.Keys[i]
+		fm.Values[i], fm.Values[unreachableIndex] = fm.Values[unreachableIndex], fm.Values[i]
+		*elementsInBucket--
 		return
 	}
 }
@@ -191,12 +185,12 @@ func (fm *FMap[T, V]) GetBucketIndexFromKey(key T) uint64 {
 
 	//We can get the remainder without division by: number & (evenNumber - 1).
 	//The lower n bits are not used for bucket selection because they are reserved for in-bucket indexing
-	return (uint64(key>>elementsPerBucketBits) & (fm.bucketCount - 1)) * elementsPerBucket
+	return (uint64(key>>elementsPerBucketBits) & (fm.bucketCount - 1)) * ElementsPerBucket
 }
 
 func (fm *FMap[T, V]) GetElementIndexFromKey(key T) uint64 {
 	x := uint64(key) & elementsPerBucketBitsMask64
-	return x & (elementsPerBucket - 1)
+	return x & (ElementsPerBucket - 1)
 }
 
 func (fm *FMap[T, V]) LoadFactor() float32 {
@@ -210,14 +204,17 @@ func (fm *FMap[T, V]) Cap() uint64 {
 func NewFMap[T AllowedKeysIf, V any]() *FMap[T, V] {
 
 	//We need to ensure bucket count is always even so we can use & to do remainder
+	const bucketCount = 2
+
 	fm := &FMap[T, V]{
-		Keys:   make([]T, 2*elementsPerBucket),
-		Values: make([]V, 2*elementsPerBucket),
-		IsSet:  make([]bool, 2*elementsPerBucket),
+		Keys:   make([]T, bucketCount*ElementsPerBucket),
+		Values: make([]V, bucketCount*ElementsPerBucket),
+
+		ElementsInBucket: make([]uint8, bucketCount),
 
 		len:         0,
-		cap:         2 * elementsPerBucket,
-		bucketCount: 2,
+		cap:         bucketCount * ElementsPerBucket,
+		bucketCount: bucketCount,
 	}
 
 	return fm
