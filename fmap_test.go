@@ -44,7 +44,8 @@ func TestFMap(t *testing.T) {
 
 	for i := uint(0); i < 256; i++ {
 		fm.Set(i, "There"+fmt.Sprint(i))
-		// fmt.Printf("i=%d, bucket=%d, index=%d\n", i, fm.GetBucketIndexFromKey(i)/fmap.ElementsPerBucket, fm.GetElementIndexFromKey(i))
+		// fmt.Printf("i=%d, grow count=%d\n", i, fm.GrowCount)
+		// fmt.Printf("i=%d, bucket=%d\n", i, fm.GetBucketIndexFromKey(i)/fmap.ElementsPerBucket)
 	}
 
 	for i := uint(0); i < 256; i++ {
@@ -65,6 +66,36 @@ func AllTrue(t *testing.T, vals ...bool) {
 }
 
 func TestPlayground(t *testing.T) {
+
+	fm := fmap.NewFMap[uint, string]()
+
+	//Fill first bucket
+	for i := 0; i < fmap.ElementsPerBucket; i++ {
+		fm.Set(uint(i), "There"+fmt.Sprint(i))
+	}
+
+	//With first bucket filled, everytime x=Cap is inserted a Grow is forced.
+	//This simulates a DOS attack
+	for i := 0; i < 10; i++ {
+		fm.Set(uint(fm.Cap()), "There"+fmt.Sprint(i))
+	}
+
+	fm = fmap.NewFMap[uint, string]()
+	currCap := fm.Cap()
+	lf := fm.LoadFactor()
+	for i := uint(0); i < 1000_000; i++ {
+
+		x := uint(rand.Uint32())
+		fm.Set(x, "There"+fmt.Sprint(i))
+
+		if fm.Cap() != currCap {
+
+			currCap = fm.Cap()
+			fmt.Printf("i=%d, grow count=%d, cap=%d, oldLF=%f\n", x, fm.GrowCount, fm.Cap(), lf)
+			lf = fm.LoadFactor()
+		}
+		// fmt.Printf("i=%d, bucket=%d\n", i, fm.GetBucketIndexFromKey(i)/fmap.ElementsPerBucket)
+	}
 
 }
 

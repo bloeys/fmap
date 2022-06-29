@@ -1,6 +1,12 @@
 package fmap
 
-import "fmt"
+import (
+	"fmt"
+	"math/rand"
+)
+
+//TODO: Logic generally looks good, but our hash function (bucket selection) is horrible and leads to super low
+//load factors.
 
 const (
 	//Must always be an even number
@@ -29,6 +35,9 @@ type FMap[T AllowedKeysIf, V any] struct {
 	//A bucket is defined by a starting index in the flat array and a constant size.
 	//For example, if ElementsPerBucket=8 then bucket=0 will be 0<=i<=7, bucket=1 will be 8<=i<=15 etc
 	bucketCount uint64
+
+	GrowCount  int
+	Randomizer T
 }
 
 func (fm *FMap[T, V]) Set(key T, value V) {
@@ -86,6 +95,8 @@ func (fm *FMap[T, V]) Set(key T, value V) {
 
 func (fm *FMap[T, V]) Grow() {
 
+	fm.GrowCount++
+
 	oldKeys := fm.Keys
 	oldValues := fm.Values
 
@@ -95,6 +106,7 @@ func (fm *FMap[T, V]) Grow() {
 	fm.len = 0 //Readding values to the new bucket will increase the size
 	fm.cap *= 2
 	fm.bucketCount *= 2
+	fm.Randomizer = T(rand.Uint64())
 
 	fm.Keys = make([]T, fm.cap)
 	fm.Values = make([]V, fm.cap)
@@ -185,15 +197,17 @@ func (fm *FMap[T, V]) Delete(key T) {
 
 func (fm *FMap[T, V]) GetBucketIndexFromKey(key T) uint64 {
 
+	key += fm.Randomizer
 	//We can get the remainder without division by: number & (evenNumber - 1).
 	//The lower n bits are not used for bucket selection because they are reserved for in-bucket indexing
-	return (uint64(key>>elementsPerBucketBits) & (fm.bucketCount - 1)) * ElementsPerBucket
+	return (uint64(key) & (fm.bucketCount - 1)) * ElementsPerBucket
+	// return (uint64(key>>elementsPerBucketBits) & (fm.bucketCount - 1)) * ElementsPerBucket
 }
 
-func (fm *FMap[T, V]) GetElementIndexFromKey(key T) uint64 {
-	x := uint64(key) & elementsPerBucketBitsMask64
-	return x & (ElementsPerBucket - 1)
-}
+// func (fm *FMap[T, V]) GetElementIndexFromKey(key T) uint64 {
+// 	x := uint64(key) & elementsPerBucketBitsMask64
+// 	return x & (ElementsPerBucket - 1)
+// }
 
 func (fm *FMap[T, V]) LoadFactor() float32 {
 	return float32(fm.len) / float32(fm.Cap())
@@ -217,6 +231,8 @@ func NewFMap[T AllowedKeysIf, V any]() *FMap[T, V] {
 		len:         0,
 		cap:         bucketCount * ElementsPerBucket,
 		bucketCount: bucketCount,
+
+		Randomizer: T(rand.Uint64()),
 	}
 
 	return fm
